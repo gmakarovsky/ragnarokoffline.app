@@ -253,6 +253,21 @@ function markFriendly(gid, on) {
 }
 const isFriendly = entity => Boolean(entity && entity.objecttype === Entity.TYPE_MOB && friendlyMonsters.has(entity.GID));
 
+// The monster an attack or a skill should go to: the current target while it
+// lives, otherwise the nearest living monster that is not a friendly one.
+function nearestMob(player) {
+    const MOB = player.constructor.TYPE_MOB;
+    let target = EntityManager.getFocusEntity();
+    if (!target || target.objecttype !== MOB || target.action === target.ACTION.DIE || isFriendly(target)) {
+        target = EntityManager.getClosestEntity(player, MOB);
+        // A friendly monster nearest: the nearest of the others in sight.
+        if (isFriendly(target)) {
+            target = EntityManager.getEntitiesSortedByDistance?.(player, MOB)?.find(entity => !isFriendly(entity)) || null;
+        }
+    }
+    return target || null;
+}
+
 // Send an @command the way the chat box does for the player's own input: a
 // public-chat packet the server reads as an atcommand. Atcommands only (@ or #),
 // so a plugin cannot put words in the player's mouth, and the server authorises
@@ -423,15 +438,7 @@ export function init() {
         attackNearest() {
             const player = Session.Entity;
             if (!player || !inputState().canMove) return false;
-            const MOB = player.constructor.TYPE_MOB;
-            let target = EntityManager.getFocusEntity();
-            if (!target || target.objecttype !== MOB || target.action === target.ACTION.DIE || isFriendly(target)) {
-                target = EntityManager.getClosestEntity(player, MOB);
-                // A friendly monster nearest: the nearest of the others in sight.
-                if (isFriendly(target)) {
-                    target = EntityManager.getEntitiesSortedByDistance?.(player, MOB)?.find(entity => !isFriendly(entity)) || null;
-                }
-            }
+            const target = nearestMob(player);
             if (!target) return false;
             const path = [];
             const count = PathFinding.search(
@@ -454,6 +461,35 @@ export function init() {
             move.dest[0] = path[(count - 1) * 2 + 0];
             move.dest[1] = path[(count - 1) * 2 + 1];
             Network.sendPacket(move);
+            return true;
+        },
+        // Finish the skill the player just started: the target cursor is up
+        // (a hotkey, the skill window), and this answers it with the nearest
+        // living monster instead of waiting for a click. An attack skill is cast
+        // on that monster, a ground skill on its cell. Anything else -- a heal,
+        // a buff, a trap -- is left for the player, since a monster is the wrong
+        // answer to it. Returns whether the skill was cast; false leaves the
+        // cursor up. The server still decides whether the cast is allowed.
+        castNearest() {
+            const player = Session.Entity;
+            // canMove is deliberately not checked: the pending cursor is a
+            // modal in inputState(), so it would always say no.
+            if (!player || activePick || player.action === player.ACTION.DIE) return false;
+            const TYPE = SkillTargetSelection.TYPE;
+            const flag = SkillTargetSelection.getFlag?.() || 0;
+            const skill = SkillTargetSelection.getSkill?.();
+            if (!flag || !skill) return false;
+            const onMonster = Boolean(flag & TYPE.ENEMY);
+            if (!onMonster && !(flag & TYPE.PLACE)) return false;
+            const target = nearestMob(player);
+            if (!target) return false;
+            const level = skill.useLevel ? skill.useLevel : skill.level;
+            Runtime.movement.clear('cast');
+            EntityManager.setFocusEntity(target);
+            // A click removes the cursor before it casts, so this does too.
+            SkillTargetSelection.remove();
+            if (onMonster) SkillTargetSelection.onUseSkillToId(skill.SKID, level, target.GID);
+            else SkillTargetSelection.onUseSkillToPos(skill.SKID, level, target.position[0] | 0, target.position[1] | 0);
             return true;
         },
         action,

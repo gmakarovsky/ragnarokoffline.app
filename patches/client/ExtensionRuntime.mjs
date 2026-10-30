@@ -171,6 +171,14 @@ export function createRuntime({ storage, report = (...args) => console.error(...
                     if (disposed) throw new Error(`Plugin ${name} is disposed`);
                     return bridge.attackNearest?.() ?? false;
                 },
+                // Answer the skill's target cursor with the nearest living
+                // monster, or its cell for a ground skill, instead of waiting
+                // for a click. Returns false, leaving the cursor up, when the
+                // skill is not an attack or ground skill or nothing is near.
+                castNearest() {
+                    if (disposed) throw new Error(`Plugin ${name} is disposed`);
+                    return bridge.castNearest?.() ?? false;
+                },
             }),
             // Raise the client's native target cursor -- the same one taming
             // items use -- and let the player click an entity. options.type picks

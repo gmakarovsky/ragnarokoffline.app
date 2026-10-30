@@ -479,6 +479,23 @@ test('api.monsters.friendly marks a monster once per plugin, checks what it is g
     assert.equal(old.friendly(110000123), false);
 });
 
+test('api.actions.castNearest asks the bridge, says no without one and refuses once the plugin is gone', async () => {
+    const [, { createRuntime }] = await modules;
+    let casts = 0, answer = true;
+    const runtime = createRuntime();
+    runtime.configure({ castNearest() { casts++; return answer; } });
+    const scope = runtime.scope('cast-on-cursor');
+    assert.equal(scope.api.actions.castNearest(), true);
+    answer = false;
+    assert.equal(scope.api.actions.castNearest(), false, 'the bridge leaving the cursor up is passed on');
+    assert.equal(casts, 2);
+    // A client without the hook: a plain no, so a mod can fall back to the mouse.
+    assert.equal(createRuntime().scope('cast-on-cursor').api.actions.castNearest(), false);
+    scope.dispose();
+    assert.throws(() => scope.api.actions.castNearest(), /disposed/);
+    assert.equal(casts, 2, 'a disposed plugin never reaches the bridge');
+});
+
 test('api.ui.scale scales the windows the client allows, checks what it is given and puts the sizes back on disposal', async () => {
     const [, { createRuntime }] = await modules;
     // The bridge as ExtensionBridge.mjs makes it, over the fork's UI/UIScale.js.
